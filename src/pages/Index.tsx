@@ -1,157 +1,173 @@
-import { useState, useMemo } from "react";
-import { Code2, Plus, Github } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Brain, Github } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { SnippetCard } from "@/components/SnippetCard";
-import { SnippetDialog } from "@/components/SnippetDialog";
-import { SearchBar } from "@/components/SearchBar";
+import { AlgorithmVisualizer } from "@/components/AlgorithmVisualizer";
+import { ControlPanel } from "@/components/ControlPanel";
+import { StatsPanel } from "@/components/StatsPanel";
+import { bubbleSort, quickSort, mergeSort, SortStep } from "@/utils/sortingAlgorithms";
 import { toast } from "sonner";
 
-interface Snippet {
-  id: string;
-  title: string;
-  description: string;
-  code: string;
-  language: string;
-  tags: string[];
-  createdAt: Date;
-}
-
-const INITIAL_SNIPPETS: Snippet[] = [
-  {
-    id: "1",
-    title: "useLocalStorage Hook",
-    description: "Custom React hook for managing localStorage with state synchronization",
-    code: `function useLocalStorage(key, initialValue) {
-  const [storedValue, setStoredValue] = useState(() => {
-    try {
-      const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
-    } catch (error) {
-      return initialValue;
-    }
-  });
-
-  const setValue = (value) => {
-    try {
-      setStoredValue(value);
-      window.localStorage.setItem(key, JSON.stringify(value));
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  return [storedValue, setValue];
-}`,
-    language: "JavaScript",
-    tags: ["react", "hooks", "localStorage"],
-    createdAt: new Date("2024-01-15"),
-  },
-  {
-    id: "2",
-    title: "Binary Search Algorithm",
-    description: "Efficient O(log n) search algorithm for sorted arrays",
-    code: `def binary_search(arr, target):
-    left, right = 0, len(arr) - 1
-    
-    while left <= right:
-        mid = (left + right) // 2
-        
-        if arr[mid] == target:
-            return mid
-        elif arr[mid] < target:
-            left = mid + 1
-        else:
-            right = mid - 1
-    
-    return -1`,
-    language: "Python",
-    tags: ["algorithm", "search", "binary-search"],
-    createdAt: new Date("2024-01-20"),
-  },
-  {
-    id: "3",
-    title: "Debounce Function",
-    description: "Utility function to limit the rate at which a function can fire",
-    code: `function debounce(func, wait) {
-  let timeout;
-  
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}`,
-    language: "TypeScript",
-    tags: ["utility", "performance", "debounce"],
-    createdAt: new Date("2024-02-01"),
-  },
-];
+const generateRandomArray = (size: number): number[] => {
+  return Array.from({ length: size }, () => Math.floor(Math.random() * 100) + 1);
+};
 
 const Index = () => {
-  const [snippets, setSnippets] = useState<Snippet[]>(INITIAL_SNIPPETS);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [languageFilter, setLanguageFilter] = useState("all");
+  const [arraySize, setArraySize] = useState(30);
+  const [array, setArray] = useState<number[]>(generateRandomArray(30));
+  const [comparingIndices, setComparingIndices] = useState<number[]>([]);
+  const [sortedIndices, setSortedIndices] = useState<number[]>([]);
+  const [swappingIndices, setSwappingIndices] = useState<number[]>([]);
+  const [isRunning, setIsRunning] = useState(false);
+  const [speed, setSpeed] = useState(100);
+  const [algorithm, setAlgorithm] = useState("bubble");
+  const [comparisons, setComparisons] = useState(0);
+  const [swaps, setSwaps] = useState(0);
+  const [timeElapsed, setTimeElapsed] = useState(0);
 
-  const languages = useMemo(() => {
-    return Array.from(new Set(snippets.map((s) => s.language))).sort();
-  }, [snippets]);
+  const generatorRef = useRef<AsyncGenerator<SortStep> | null>(null);
+  const startTimeRef = useRef<number>(0);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const filteredSnippets = useMemo(() => {
-    return snippets.filter((snippet) => {
-      const matchesSearch =
-        searchQuery === "" ||
-        snippet.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        snippet.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        snippet.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase()));
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
 
-      const matchesLanguage = languageFilter === "all" || snippet.language === languageFilter;
+  const handleShuffle = () => {
+    const newArray = generateRandomArray(arraySize);
+    setArray(newArray);
+    resetStats();
+    toast.success("Array shuffled!");
+  };
 
-      return matchesSearch && matchesLanguage;
-    });
-  }, [snippets, searchQuery, languageFilter]);
+  const handleReset = () => {
+    setIsRunning(false);
+    if (timerRef.current) clearInterval(timerRef.current);
+    handleShuffle();
+  };
 
-  const handleSave = (snippetData: Omit<Snippet, "id" | "createdAt">) => {
-    if (editingSnippet) {
-      setSnippets((prev) =>
-        prev.map((s) =>
-          s.id === editingSnippet.id
-            ? { ...snippetData, id: s.id, createdAt: s.createdAt }
-            : s
-        )
-      );
-      toast.success("Snippet updated successfully!");
-      setEditingSnippet(null);
-    } else {
-      const newSnippet: Snippet = {
-        ...snippetData,
-        id: Date.now().toString(),
-        createdAt: new Date(),
-      };
-      setSnippets((prev) => [newSnippet, ...prev]);
-      toast.success("Snippet created successfully!");
+  const resetStats = () => {
+    setComparingIndices([]);
+    setSortedIndices([]);
+    setSwappingIndices([]);
+    setComparisons(0);
+    setSwaps(0);
+    setTimeElapsed(0);
+  };
+
+  const handleArraySizeChange = (value: number[]) => {
+    const newSize = value[0];
+    setArraySize(newSize);
+    const newArray = generateRandomArray(newSize);
+    setArray(newArray);
+    resetStats();
+  };
+
+  const startTimer = () => {
+    startTimeRef.current = Date.now();
+    timerRef.current = setInterval(() => {
+      setTimeElapsed(Date.now() - startTimeRef.current);
+    }, 100);
+  };
+
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
     }
   };
 
-  const handleEdit = (snippet: Snippet) => {
-    setEditingSnippet(snippet);
-    setDialogOpen(true);
+  const handleStart = async () => {
+    if (isRunning) return;
+
+    setIsRunning(true);
+    resetStats();
+    startTimer();
+
+    switch (algorithm) {
+      case "bubble":
+        generatorRef.current = bubbleSort(array);
+        break;
+      case "quick":
+        generatorRef.current = quickSort(array);
+        break;
+      case "merge":
+        generatorRef.current = mergeSort(array);
+        break;
+    }
+
+    await runSortingSteps();
   };
 
-  const handleDelete = (id: string) => {
-    setSnippets((prev) => prev.filter((s) => s.id !== id));
-    toast.success("Snippet deleted successfully!");
+  const runSortingSteps = async () => {
+    if (!generatorRef.current) return;
+
+    let prevComparingLength = 0;
+    let prevSwappingLength = 0;
+
+    while (isRunning) {
+      const { value, done } = await generatorRef.current.next();
+
+      if (done) {
+        stopTimer();
+        setIsRunning(false);
+        toast.success("Sorting complete!");
+        break;
+      }
+
+      setArray(value.array);
+      setComparingIndices(value.comparingIndices);
+      setSwappingIndices(value.swappingIndices);
+      setSortedIndices(value.sortedIndices);
+
+      if (value.comparingIndices.length > 0 && prevComparingLength === 0) {
+        setComparisons((prev) => prev + 1);
+      }
+
+      if (value.swappingIndices.length > 0 && prevSwappingLength === 0) {
+        setSwaps((prev) => prev + 1);
+      }
+
+      prevComparingLength = value.comparingIndices.length;
+      prevSwappingLength = value.swappingIndices.length;
+
+      await new Promise((resolve) => setTimeout(resolve, speed));
+    }
   };
 
-  const handleNewSnippet = () => {
-    setEditingSnippet(null);
-    setDialogOpen(true);
+  const handlePause = () => {
+    setIsRunning(false);
+    stopTimer();
+    toast.info("Sorting paused");
   };
+
+  const getAlgorithmInfo = () => {
+    switch (algorithm) {
+      case "bubble":
+        return {
+          name: "Bubble Sort",
+          complexity: "O(n²)",
+          description: "Repeatedly steps through the list, compares adjacent elements and swaps them if they are in the wrong order.",
+        };
+      case "quick":
+        return {
+          name: "Quick Sort",
+          complexity: "O(n log n)",
+          description: "Divides array into smaller sub-arrays using a pivot element and recursively sorts them.",
+        };
+      case "merge":
+        return {
+          name: "Merge Sort",
+          complexity: "O(n log n)",
+          description: "Divides array into halves, recursively sorts them, and then merges the sorted halves.",
+        };
+      default:
+        return { name: "", complexity: "", description: "" };
+    }
+  };
+
+  const algorithmInfo = getAlgorithmInfo();
 
   return (
     <div className="min-h-screen bg-background">
@@ -160,80 +176,77 @@ const Index = () => {
         <div className="container mx-auto px-4 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Code2 className="w-8 h-8 text-primary" />
+              <div className="p-2 rounded-xl gradient-primary glow-primary">
+                <Brain className="w-8 h-8 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold">CodeVault</h1>
-                <p className="text-sm text-muted-foreground">Your Personal Snippet Library</p>
+                <h1 className="text-2xl font-bold">AlgoViz</h1>
+                <p className="text-sm text-muted-foreground">Interactive Sorting Algorithm Visualizer</p>
               </div>
             </div>
-            
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2"
-                onClick={() => window.open("https://github.com", "_blank")}
-              >
-                <Github className="w-4 h-4" />
-                <span className="hidden sm:inline">GitHub</span>
-              </Button>
-              <Button onClick={handleNewSnippet} className="gap-2">
-                <Plus className="w-4 h-4" />
-                New Snippet
-              </Button>
-            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => window.open("https://github.com", "_blank")}
+            >
+              <Github className="w-4 h-4" />
+              <span className="hidden sm:inline">GitHub</span>
+            </Button>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <SearchBar
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            languageFilter={languageFilter}
-            onLanguageFilterChange={setLanguageFilter}
-            languages={languages}
-          />
+      <main className="container mx-auto px-4 py-8 space-y-8">
+        {/* Algorithm Info */}
+        <div className="bg-card border border-border rounded-xl p-6 animate-fade-in">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold mb-1">{algorithmInfo.name}</h2>
+              <p className="text-sm text-muted-foreground">{algorithmInfo.description}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Time Complexity:</span>
+              <code className="px-3 py-1 bg-secondary rounded-lg font-mono text-sm text-primary font-semibold">
+                {algorithmInfo.complexity}
+              </code>
+            </div>
+          </div>
         </div>
 
-        {filteredSnippets.length === 0 ? (
-          <div className="text-center py-16">
-            <Code2 className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-            <h3 className="text-xl font-semibold mb-2">No snippets found</h3>
-            <p className="text-muted-foreground mb-6">
-              {searchQuery || languageFilter !== "all"
-                ? "Try adjusting your search or filters"
-                : "Get started by creating your first code snippet"}
-            </p>
-            <Button onClick={handleNewSnippet}>
-              <Plus className="w-4 h-4 mr-2" />
-              Create Snippet
-            </Button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredSnippets.map((snippet) => (
-              <SnippetCard
-                key={snippet.id}
-                snippet={snippet}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-              />
-            ))}
-          </div>
-        )}
-      </main>
+        {/* Stats */}
+        <StatsPanel comparisons={comparisons} swaps={swaps} timeElapsed={timeElapsed} />
 
-      <SnippetDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        onSave={handleSave}
-        editingSnippet={editingSnippet}
-      />
+        {/* Visualizer */}
+        <AlgorithmVisualizer
+          array={array}
+          comparingIndices={comparingIndices}
+          sortedIndices={sortedIndices}
+          swappingIndices={swappingIndices}
+        />
+
+        {/* Controls */}
+        <ControlPanel
+          isRunning={isRunning}
+          onStart={handleStart}
+          onPause={handlePause}
+          onReset={handleReset}
+          onShuffle={handleShuffle}
+          speed={speed}
+          onSpeedChange={(value) => setSpeed(value[0])}
+          arraySize={arraySize}
+          onArraySizeChange={handleArraySizeChange}
+          algorithm={algorithm}
+          onAlgorithmChange={setAlgorithm}
+        />
+
+        {/* Footer Info */}
+        <div className="text-center text-sm text-muted-foreground animate-fade-in">
+          <p>Hover over bars to see their values • Adjust speed and array size for different visualizations</p>
+        </div>
+      </main>
     </div>
   );
 };
